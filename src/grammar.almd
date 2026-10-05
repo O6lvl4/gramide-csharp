@@ -1,0 +1,187 @@
+// A real recursive grammar for the documented core subset, authored from the
+// public language specification. No balanced-token fallback accepts a body.
+import gramide.parser
+import gramide.parser.{ tok, lit, keep, r, seq, alt, rep, opt, wrap, field, nest, ahead, nott, prec, leftf, lits, keeps, nothing, grammar, recover, recover_all }
+import self.lexer
+
+let JAVA = false
+fn one_or_more(item: parser.Rule, separator: String) -> parser.Rule = seq([item, rep(if separator == "" then item else seq([lit(separator), item]))])
+fn items(item: parser.Rule) -> parser.Rule = opt(one_or_more(item, ","))
+fn trailing_items(item: parser.Rule) -> parser.Rule = opt(seq([one_or_more(item, ","), opt(lit(","))]))
+fn named() -> parser.Rule = field("name", r("name"))
+fn parens(item: parser.Rule) -> parser.Rule = seq([lit("("), item, lit(")")])
+fn brackets(item: parser.Rule) -> parser.Rule = seq([lit("["), item, lit("]")])
+
+fn common_rules() -> List[(String, parser.Rule)] = [
+  ("source_file", wrap("source_file", rep(recover_all(r("top_declaration"))))),
+  ("name", alt([tok("identifier"), keeps(["record", "init", "get", "set", "add", "remove", "partial", "async", "await", "var", "where", "unmanaged", "notnull", "global", "required", "file", "scoped", "yield", "with", "when"])])),
+  ("qualified_name", wrap("qualified_name", one_or_more(r("name"), "."))),
+  ("modifiers", rep(alt([lits(["public", "protected", "private", "internal", "static", "abstract", "sealed", "virtual", "override", "new", "partial", "async", "extern", "unsafe", "readonly", "volatile", "const", "required", "file", "ref"]), r("annotation")]))),
+  ("type_parameters", opt(wrap("type_parameters", seq([lit("<"), one_or_more(r("type_parameter"), ","), lit(">")])))),
+  ("type_arguments", seq([lit("<"), one_or_more(r("type_argument"), ","), lit(">")])),
+  ("type_argument", if JAVA then alt([seq([lit("?"), opt(seq([lits(["extends", "super"]), r("type")]))]), r("type")]) else r("type")),
+  ("type_segment", seq([r("name"), opt(r("type_arguments"))])),
+  ("reference_type", wrap("type_name", seq([
+    if JAVA then seq([]) else opt(seq([r("name"), lit("::")])),
+    r("type_segment"), rep(seq([lit("."), r("type_segment")]))
+  ]))),
+  ("base_type", alt([wrap("primitive_type", keeps(["bool", "byte", "sbyte", "short", "ushort", "int", "uint", "long", "ulong", "char", "float", "double", "decimal", "string", "object"])), r("reference_type")])),
+  ("array_suffix", if JAVA then brackets(seq([])) else brackets(rep(lit(",")))),
+  ("type", wrap("type", seq([r("base_type"), if JAVA then seq([]) else opt(lit("?")), rep(r("array_suffix")), if JAVA then seq([]) else opt(lit("?"))]))),
+  ("return_type", alt([keep("void"), r("type")])),
+  ("parameter", wrap("parameter", seq([
+    if JAVA then rep(alt([lit("final"), r("annotation")])) else rep(lits(["this", "ref", "out", "in", "params", "scoped", "readonly"])),
+    r("type"), if JAVA then opt(lit("...")) else seq([]), named(),
+    if JAVA then rep(r("array_suffix")) else opt(seq([lit("="), r("expression")]))
+  ]))),
+  ("parameters", wrap("parameters", parens(items(r("parameter"))))),
+  ("class_body", wrap("class_body", seq([lit("{"), rep(recover(r("member"))), lit("}")]))),
+  ("member", alt([r("type_declaration"), r("constructor_declaration"), r("method_declaration"), r("member_extra"), r("field_declaration"), lit(";") ])),
+  ("method_declaration", wrap("method_declaration", seq([
+    r("modifiers"), if JAVA then r("type_parameters") else seq([]), r("return_type"), named(),
+    if JAVA then seq([]) else r("type_parameters"), r("parameters"),
+    if JAVA then rep(r("array_suffix")) else seq([]), r("method_suffix"), r("method_body")
+  ]))),
+  ("constructor_declaration", wrap("constructor_declaration", seq([
+    r("modifiers"), if JAVA then r("type_parameters") else seq([]), named(), r("parameters"), r("constructor_suffix"), r("block")
+  ]))),
+  ("field_declaration", wrap("field_declaration", seq([r("modifiers"), r("type"), one_or_more(r("field"), ","), lit(";")]))),
+  ("field", wrap("field", seq([named(), if JAVA then rep(r("array_suffix")) else seq([]), opt(seq([lit("="), r("initializer")]))]))),
+  ("initializer", alt([r("array_initializer"), r("expression")])),
+  ("array_initializer", wrap("array_initializer", seq([lit("{"), trailing_items(r("initializer")), lit("}")]))),
+  ("local_declaration", wrap("local_declaration", seq([
+    if JAVA then rep(alt([lit("final"), r("annotation")])) else opt(lit("const")),
+    alt([keep("var"), r("type")]), one_or_more(r("local_variable"), ",")
+  ]))),
+  ("local_variable", wrap("local_variable", seq([named(), if JAVA then rep(r("array_suffix")) else seq([]), opt(seq([lit("="), r("initializer")]))]))),
+  ("block", wrap("block", seq([lit("{"), rep(recover(r("statement"))), lit("}")]))),
+  ("statement", alt([
+    r("block"), r("type_declaration"), r("if_statement"), r("while_statement"), r("do_statement"), r("for_statement"),
+    r("foreach_statement"), r("try_statement"), r("switch_statement"), r("statement_extra"),
+    wrap("return_statement", seq([lit("return"), opt(r("expression")), lit(";")])),
+    wrap("throw_statement", seq([lit("throw"), if JAVA then r("expression") else opt(r("expression")), lit(";")])),
+    wrap("jump_statement", seq([lits(["break", "continue"]), if JAVA then opt(r("name")) else seq([]), lit(";")])),
+    wrap("local_statement", seq([r("local_declaration"), lit(";")])),
+    wrap("label_statement", seq([r("name"), lit(":"), r("statement")])),
+    wrap("expression_statement", seq([r("expression"), lit(";")])), lit(";")
+  ])),
+  ("if_statement", wrap("if_statement", seq([lit("if"), parens(r("expression")), r("statement"), opt(seq([lit("else"), r("statement")]))]))),
+  ("while_statement", wrap("while_statement", seq([lit("while"), parens(r("expression")), r("statement")]))),
+  ("do_statement", wrap("do_statement", seq([lit("do"), r("statement"), lit("while"), parens(r("expression")), lit(";")]))),
+  ("for_statement", wrap("for_statement", seq([
+    lit("for"), lit("("), opt(alt([r("local_declaration"), one_or_more(r("expression"), ",")])), lit(";"),
+    opt(r("expression")), lit(";"), items(r("expression")), lit(")"), r("statement")
+  ]))),
+  ("switch_statement", wrap("switch_statement", seq([lit("switch"), parens(r("expression")), lit("{"), rep(r("switch_section")), lit("}")]))),
+  ("switch_section", wrap("switch_section", seq([
+    one_or_more(alt([seq([lit("case"), r("expression"), lit(":")]), seq([lit("default"), lit(":")])]), ""),
+    rep(r("statement"))
+  ]))),
+  ("expression", alt([r("lambda"), r("assignment")])),
+  ("lambda", wrap("lambda_expression", seq([
+    if JAVA then seq([]) else opt(lit("async")),
+    alt([r("name"), parens(items(alt([r("parameter"), r("name")])))]), lit(if JAVA then "->" else "=>"), alt([r("block"), r("expression")])
+  ]))),
+  ("assignment", nest("assignment", seq([r("conditional"), opt(seq([
+    field("operator", alt([keeps(["=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<="] + (if JAVA then [] else ["??="])),
+      wrap("operator", seq([lit(">"), lit(">"), if JAVA then opt(lit(">")) else seq([]), lit("=")]))])), r("expression")
+  ]))]))),
+  ("conditional", nest("conditional", seq([r("binary"), opt(seq([lit("?"), r("expression"), lit(":"), r("expression")]))]))),
+  ("binary", prec("binary", r("relational"), [
+    if JAVA then nothing() else keep("??"), keep("||"), keep("&&"), keep("|"), keep("^"), keep("&"), keeps(["==", "!="])
+  ])),
+  ("relational", nest("binary", seq([r("shift"), rep(alt([
+    seq([alt([keeps(["<", "<="]), wrap("operator", seq([keep(">"), opt(keep("="))]))]), r("shift")]),
+    seq([keep(if JAVA then "instanceof" else "is"), r("type")]),
+    if JAVA then nothing() else seq([keep("as"), r("type")])
+  ]))]))),
+  ("shift", leftf("binary", r("additive"), alt([keep("<<"), wrap("operator", seq([lit(">"), lit(">"), if JAVA then opt(lit(">")) else seq([])]))]))),
+  ("additive", prec("binary", r("unary"), [keeps(["+", "-"]), keeps(["*", "/", "%"])])),
+  ("unary", alt([
+    wrap("unary", seq([keeps(["+", "-", "!", "~", "++", "--"] + (if JAVA then [] else ["await"])), r("unary")])),
+    wrap("cast_expression", seq([parens(r("type")), r("unary")])), r("postfix")
+  ])),
+  ("postfix", nest("postfix", seq([r("primary"), rep(alt([
+    r("arguments"), r("field_access"), wrap("index", brackets(one_or_more(r("expression"), ","))),
+    if JAVA then wrap("method_reference", seq([lit("::"), opt(r("type_arguments")), alt([r("name"), keep("new")])])) else keep("!")
+  ])), opt(keeps(["++", "--"]))]))),
+  ("field_access", wrap("field_access", seq([lits(if JAVA then ["."] else [".", "?."]), opt(r("type_arguments")), field("field", alt([r("name"), keep("class")])),
+    if JAVA then seq([]) else opt(seq([r("type_arguments"), ahead(lit("("))]))
+  ]))),
+  ("arguments", wrap("arguments", parens(items(r("argument"))))),
+  ("argument", if JAVA then r("expression") else seq([opt(seq([r("name"), lit(":")])), opt(lits(["ref", "out", "in"])), r("expression")])),
+  ("primary", alt([
+    tok("number"), tok("string"), tok("rune"), keeps(["true", "false", "null", "this"] + (if JAVA then ["super"] else ["base", "default"])),
+    r("new_expression"), r("primary_extra"),
+    seq([r("name"), if JAVA then seq([]) else opt(seq([r("type_arguments"), ahead(lit("("))]))]),
+    wrap("parenthesized", parens(r("expression")))
+  ])),
+  ("new_expression", wrap("new_expression", seq([lit("new"), r("new_base_type"), alt([
+    seq([r("arguments"), r("new_body")]),
+    seq([one_or_more(brackets(opt(r("expression"))), ""), opt(r("array_initializer"))])
+  ])]))),
+]
+
+fn language_rules() -> List[(String, parser.Rule)] = [
+  ("top_declaration", alt([r("using_directive"), r("namespace_declaration"), r("type_declaration"), lit(";")])),
+  ("using_directive", wrap("using_directive", seq([opt(lit("global")), lit("using"), opt(lit("static")), opt(seq([r("name"), lit("=")])), r("type"), lit(";")]))),
+  ("namespace_declaration", wrap("namespace_declaration", seq([lit("namespace"), field("name", r("qualified_name")), alt([
+    seq([lit("{"), rep(recover(r("top_declaration"))), lit("}"), opt(lit(";"))]),
+    seq([lit(";"), rep(recover_all(r("top_declaration")))])
+  ])]))),
+  ("annotation", wrap("attribute", brackets(seq([opt(seq([r("name"), lit(":")])), one_or_more(seq([r("qualified_name"), opt(r("arguments"))]), ",")])))),
+  ("type_parameter", wrap("type_parameter", seq([rep(r("annotation")), opt(lits(["in", "out"])), named()]))),
+  ("constraints", rep(wrap("constraint_clause", seq([lit("where"), r("name"), lit(":"), one_or_more(alt([
+    seq([lits(["class", "struct", "notnull", "unmanaged"]), opt(lit("?"))]), seq([lit("new"), parens(seq([]))]), r("type")
+  ]), ",")])))),
+  ("base_list", opt(seq([lit(":"), one_or_more(seq([r("type"), opt(r("arguments"))]), ",")]))),
+  ("type_declaration", alt([r("class_declaration"), r("struct_declaration"), r("interface_declaration"), r("enum_declaration"), r("record_declaration"), r("delegate_declaration")])),
+  ("class_declaration", wrap("class_declaration", seq([r("modifiers"), lit("class"), named(), r("type_parameters"), opt(r("parameters")), r("base_list"), r("constraints"), r("class_body"), opt(lit(";"))]))),
+  ("struct_declaration", wrap("struct_declaration", seq([r("modifiers"), lit("struct"), named(), r("type_parameters"), opt(r("parameters")), r("base_list"), r("constraints"), r("class_body"), opt(lit(";"))]))),
+  ("interface_declaration", wrap("interface_declaration", seq([r("modifiers"), lit("interface"), named(), r("type_parameters"), r("base_list"), r("constraints"), r("class_body"), opt(lit(";"))]))),
+  ("record_declaration", wrap("record_declaration", seq([r("modifiers"), lit("record"), opt(lits(["class", "struct"])), named(), r("type_parameters"), opt(r("parameters")), r("base_list"), r("constraints"), alt([r("class_body"), lit(";")])]))),
+  ("delegate_declaration", wrap("delegate_declaration", seq([r("modifiers"), lit("delegate"), r("return_type"), named(), r("type_parameters"), r("parameters"), r("constraints"), lit(";")]))),
+  ("enum_declaration", wrap("enum_declaration", seq([r("modifiers"), lit("enum"), named(), opt(seq([lit(":"), r("type")])), lit("{"), trailing_items(wrap("enum_constant", seq([rep(r("annotation")), named(), opt(seq([lit("="), r("expression")]))]))), lit("}"), opt(lit(";"))]))),
+  ("method_suffix", r("constraints")),
+  ("constructor_suffix", opt(seq([lit(":"), lits(["base", "this"]), r("arguments")]))),
+  ("method_body", alt([r("block"), seq([lit("=>"), r("expression"), lit(";")]), lit(";")])),
+  ("member_extra", alt([
+    wrap("property_declaration", seq([r("modifiers"), r("type"), named(), alt([
+      seq([lit("{"), one_or_more(r("accessor"), ""), lit("}"), opt(seq([lit("="), r("initializer"), lit(";")]))]),
+      seq([lit("=>"), r("expression"), lit(";")])
+    ])])),
+    wrap("event_declaration", seq([r("modifiers"), lit("event"), r("type"), named(), alt([
+      seq([opt(seq([lit("="), r("expression")])), lit(";")]), seq([lit("{"), one_or_more(r("accessor"), ""), lit("}")])
+    ])]))
+  ])),
+  ("accessor", wrap("accessor", seq([r("modifiers"), lits(["get", "set", "init", "add", "remove"]), r("method_body")]))),
+  ("foreach_statement", wrap("foreach_statement", seq([opt(lit("await")), lit("foreach"), lit("("), alt([keep("var"), r("type")]), named(), lit("in"), r("expression"), lit(")"), r("statement")]))),
+  ("catch_clause", wrap("catch_clause", seq([lit("catch"), opt(parens(seq([r("type"), opt(named())]))), opt(seq([lit("when"), parens(r("expression"))])), r("block")]))),
+  ("finally_clause", seq([lit("finally"), r("block")])),
+  ("try_statement", wrap("try_statement", seq([lit("try"), r("block"), alt([
+    seq([one_or_more(r("catch_clause"), ""), opt(r("finally_clause"))]), r("finally_clause")
+  ])]))),
+  ("statement_extra", alt([
+    wrap("lock_statement", seq([lit("lock"), parens(r("expression")), r("statement")])),
+    wrap("checked_statement", seq([lits(["checked", "unchecked", "unsafe"]), r("block")])),
+    wrap("using_statement", seq([opt(lit("await")), lit("using"), alt([
+      seq([parens(alt([r("local_declaration"), r("expression")])), r("statement")]), seq([r("local_declaration"), lit(";")])
+    ])])),
+    wrap("yield_statement", seq([lit("yield"), alt([seq([lit("return"), r("expression")]), lit("break")]), lit(";")])),
+    wrap("goto_statement", seq([lit("goto"), alt([r("name"), seq([lit("case"), r("expression")]), lit("default")]), lit(";")]))
+  ])),
+  ("primary_extra", alt([
+    seq([lits(["typeof", "sizeof", "default"]), parens(r("type"))]),
+    seq([lits(["checked", "unchecked"]), parens(r("expression"))])
+  ])),
+  ("new_base_type", r("base_type")),
+  ("new_body", opt(wrap("object_initializer", seq([lit("{"), trailing_items(alt([
+    seq([r("name"), lit("="), r("initializer")]), r("array_initializer"), r("expression")
+  ])), lit("}")])))),
+]
+
+fn rules() -> parser.Grammar = grammar("source_file", common_rules() + language_rules())
+fn parse_source(source: String) -> Result[parser.Parsed, String] = {
+  let tokens = lexer.scan(source, false) |> result.map_err((e) => e.message)!
+  parser.parse(rules(), bytes.from_string(source), tokens) |> result.map_err((e) => parser.format_failure(e))
+}

@@ -1,0 +1,84 @@
+import gramide.parser
+import gramide.tree
+import gramide.tags
+import self.grammar
+import self.lexer
+import self.symbols
+import self.table
+
+test "generics.cs core declarations and bodies parse" {
+  let source = "using Map = System.Collections.Generic.Dictionary<string, int>;\nnamespace Data {\n    public interface IRepository<in T, out U> { U Read(T key); }\n    public record struct Entry<T>(string Name, T Value) where T : class;\n    public partial class Service<T> where T : class, new() {\n        public System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<T>> Values;\n        public T Create() => new T();\n        public int @class { get; init; }\n        public long Number() => 0xFFUL + 0b1010 + 1_000L;\n        public decimal Price() => 1.25m;\n        public string Read(object item) => item as string ?? \"\";\n        public bool Test(object item) => item is string;\n    }\n}\n"
+  assert_eq(grammar.parse_source(source) |> result.map((_) => true), ok(true))
+  let tokens = lexer.scan(source, false)!
+  let dynamic = parser.parse(grammar.rules(), bytes.from_string(source), tokens)!
+  let compiled = parser.parse_with(table.compiled(), bytes.from_string(source), tokens)!
+  assert_eq(tree.sexp(dynamic.root, dynamic.names), tree.sexp(compiled.root, compiled.names))
+}
+
+test "model.cs core declarations and bodies parse" {
+  let source = "using System;\nusing System.Collections.Generic;\nnamespace Demo.Models {\n    [Obsolete(\"sample\")]\n    public class Box<T> : IView<T> where T : class, new() {\n        private readonly List<T> values = new List<T>();\n        public Box(T value) { values.Add(value); }\n        public T First() { return values[0]; }\n        public U Map<U>(U value) where U : class { return value; }\n        public int Count { get; private set; } = 0;\n        public string Name => \"box\";\n        public event EventHandler Changed;\n        public class Nested { public int Value; }\n    }\n    public interface IView<T> { T First(); int Count { get; } }\n    public record Pair<T>(T First, T Second);\n    public readonly struct Point { public readonly int X; public Point(int x) { X = x; } }\n    public enum Color : byte { Red = 1, Green, Blue = 4 }\n    public delegate TResult Factory<T, TResult>(T value) where T : class;\n}\n"
+  assert_eq(grammar.parse_source(source) |> result.map((_) => true), ok(true))
+  let tokens = lexer.scan(source, false)!
+  let dynamic = parser.parse(grammar.rules(), bytes.from_string(source), tokens)!
+  let compiled = parser.parse_with(table.compiled(), bytes.from_string(source), tokens)!
+  assert_eq(tree.sexp(dynamic.root, dynamic.names), tree.sexp(compiled.root, compiled.names))
+}
+
+test "statements.cs core declarations and bodies parse" {
+  let source = "using System;\nnamespace Demo;\npublic class Worker {\n    private int count = 0, limit = 3;\n    private string café = @\"C:\\data\\\"\"file\"\"\";\n    private char mark = '\\n';\n    public Worker() : this(1) { }\n    public Worker(int start) { count = start; }\n    public int Run() {\n        Func<int, int> next = x => x + 1;\n        int[] numbers = new int[] {1, 2, 3};\n        for (int i = 0; i < numbers.Length; i++) { count += numbers[i]; }\n        foreach (var item in numbers) { if (item == 0) continue; }\n        while (count < 10) count++;\n        do { count--; } while (count > 10);\n        try { using (var input = Open()) { lock (this) { input.Read(); } } }\n        catch (Exception error) when (error != null) { throw; }\n        finally { count = 0; }\n        switch (count) { case 0: count++; break; default: return -1; }\n        return (count << 1) + (count >> 1);\n    }\n}\npublic class 東京 { public string 挨拶() => \"こんにちは\"; }\n"
+  assert_eq(grammar.parse_source(source) |> result.map((_) => true), ok(true))
+  let tokens = lexer.scan(source, false)!
+  let dynamic = parser.parse(grammar.rules(), bytes.from_string(source), tokens)!
+  let compiled = parser.parse_with(table.compiled(), bytes.from_string(source), tokens)!
+  assert_eq(tree.sexp(dynamic.root, dynamic.names), tree.sexp(compiled.root, compiled.names))
+}
+
+test "binary_float.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Broken { int value = 0b1f; }\n")))
+}
+
+test "broken_body.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Broken { void run() { return 1 + ; } }\n")))
+}
+
+test "broken_method.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Broken { public int run( { return 1; } }\n")))
+}
+
+test "generic_gap.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Broken { List<int,> value; }\n")))
+}
+
+test "missing_expression.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Missing { int value = ; }\n")))
+}
+
+test "missing_semicolon.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Broken { int value = 1 }\n")))
+}
+
+test "try_without_handler.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Broken { void run() { try {} } }\n")))
+}
+
+test "unclosed_class.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Broken { int value;\n")))
+}
+
+test "unclosed_string.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class Broken { string value = \"unterminated; }\n")))
+}
+
+test "unicode_symbol.cs is rejected rather than balanced-token accepted" {
+  assert(result.is_err(grammar.parse_source("class 🪨 {}\n")))
+}
+
+test "nested declarations use complete byte ranges and method owners" {
+  let source = "// 日本語\nclass Outer { int count; class Inner { int Value() { return 1; } } }"
+  let raw = bytes.from_string(source)
+  let tokens = lexer.scan(source, false)!
+  let parsed = parser.parse_with(table.compiled(), raw, tokens)!
+  let outline = tags.outline(parsed.root, tokens, raw, parsed.names, ".", symbols.symbol_rules())
+  assert(list.contains(outline, "L2-2 class Outer"))
+  assert(list.contains(outline, "    L2-2 method Inner.Value"))
+}

@@ -1,0 +1,68 @@
+{
+  "good": {
+    "valid/generics.cs": [
+      "Data",
+      "Data.IRepository",
+      "Data.IRepository.Read",
+      "Data.Entry",
+      "Data.Service",
+      "Data.Service.Values",
+      "Data.Service.Create",
+      "Data.Service.@class",
+      "Data.Service.Number",
+      "Data.Service.Price",
+      "Data.Service.Read",
+      "Data.Service.Test"
+    ],
+    "valid/model.cs": [
+      "Demo.Models",
+      "Demo.Models.Box",
+      "Demo.Models.Box.values",
+      "Demo.Models.Box.Box",
+      "Demo.Models.Box.First",
+      "Demo.Models.Box.Map",
+      "Demo.Models.Box.Count",
+      "Demo.Models.Box.Name",
+      "Demo.Models.Box.Changed",
+      "Demo.Models.Box.Nested",
+      "Demo.Models.Box.Nested.Value",
+      "Demo.Models.IView",
+      "Demo.Models.IView.First",
+      "Demo.Models.IView.Count",
+      "Demo.Models.Pair",
+      "Demo.Models.Point",
+      "Demo.Models.Point.X",
+      "Demo.Models.Point.Point",
+      "Demo.Models.Color",
+      "Demo.Models.Color.Red",
+      "Demo.Models.Color.Green",
+      "Demo.Models.Color.Blue",
+      "Demo.Models.Factory"
+    ],
+    "valid/statements.cs": [
+      "Demo",
+      "Demo.Worker",
+      "Demo.Worker.count",
+      "Demo.Worker.limit",
+      "Demo.Worker.café",
+      "Demo.Worker.mark",
+      "Demo.Worker.Worker",
+      "Demo.Worker.Worker",
+      "Demo.Worker.Run",
+      "Demo.東京",
+      "Demo.東京.挨拶"
+    ]
+  },
+  "bad": [
+    "invalid/binary_float.cs",
+    "invalid/broken_body.cs",
+    "invalid/broken_method.cs",
+    "invalid/generic_gap.cs",
+    "invalid/missing_expression.cs",
+    "invalid/missing_semicolon.cs",
+    "invalid/try_without_handler.cs",
+    "invalid/unclosed_class.cs",
+    "invalid/unclosed_string.cs",
+    "invalid/unicode_symbol.cs"
+  ]
+}
